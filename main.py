@@ -1,13 +1,27 @@
-import numpy as np
+import numpy as torch
+import torch
 
-def densityp(Pl:np.matrix, Pr:np.matrix):
-    return np.trace(Pl @ Pr) == 1
+import torch.nn as nn
 
-def phi(Pl:np.matrix, M:np.matrix, Pr:np.matrix):
-    return np.trace(Pl@M@Pr@M.getH())
+import torch.linalg as L
+import torch.functional as F
 
-def semidefinitify(m:np.matrix):
-    """take m and appling to its conjugate transpose, hence returning a semidefinte matrix
+from nltk.corpus import brown
+from nltk.probability import *
+from nltk.collocations import *
+
+from nltk import sent_tokenize
+
+from sklearn.feature_extraction.text import CountVectorizer
+
+def densityp(Pl:torch.tensor, Pr:torch.tensor):
+    return torch.trace(Pl @ Pr) == 1
+
+def phi(Pl:torch.tensor, M:torch.tensor, Pr:torch.tensor):
+    return torch.trace(Pl@M@Pr@M.conj().transpose(1,0))
+
+def semidefinitify(m:torch.tensor):
+    """take m and appling to its conjugate transpose, hence returning a semidefinte tensor
 
     Conditions for semidefinity: z* M z is real positive for any nonzero complex vector z
 
@@ -17,24 +31,29 @@ def semidefinitify(m:np.matrix):
 
     Question for ted: wouldn't this make all M real? Isn't that a problem?
     """
-    return m @ m.getH()
+    return m @ m.conj().transpose(1,0)
+
+# prepare n-gram frequency data
+vect = CountVectorizer(analyzer='word', ngram_range=(1,3))
+analyzer = vect.build_analyzer()
+results = analyzer(' '.join(brown.words()))
+results.reverse() # because we want the LEAST frequent first
+frequency_distribution = nltk.FreqDist(results)
+
+# and now
+relative_frequency = frequency_distribution.freq("what")
+relative_frequency
+
+# get total ngrams
+total_ngrams = len(frequency_distribution)
+# create a random embedding space of it; embedding each in a 
+embedding = nn.Embedding(total_ngrams, 8)
+embedding(torch.tensor(0))
 
 
-
-semidefinitify(np.matrix(np.random.rand(5,5) + 1j * np.random.rand(5,5)))
-
-np.linalg.eigvals(semidefinitify(np.matrix([[1+8j, 2-8j],
-                                            [0, 1]])))
-
-semidefinitify(np.matrix([[1+8j, 2-8j],
-                          [0, 1]]))
-
-densityp(np.matrix([[1+2j, 3+3j],
-                    [0, 1]]),
-         np.matrix([[1-5j, 2+0j],
-                    [1, 1]]))
-
-type(np.matrix([[1-5j, 2+0j],
-                [1, 1]]))
-
+# questions
+# 1. good corpus? brown is fine.
+# 2. reliable generation scheme for M (dxd) than random?
+# 3. m @ m.conj().transpose(1,0) definitely yields a semidefinite matrix, but
+#    is it any good?
 
