@@ -72,6 +72,13 @@ class QNLPModel(nn.Module):
 
         return phi_M
 
+    def get_m(self, x):
+        embedded = self.D(self.embedding(x).unsqueeze(2))
+        base_matrix = torch.eye(self.hidden)
+        for i in reversed(embedded):
+            base_matrix = i@base_matrix
+        return base_matrix
+
 # prepare n-gram frequency data
 vect = CountVectorizer(analyzer='word', ngram_range=(1,3))
 analyzer = vect.build_analyzer()
@@ -110,6 +117,7 @@ for group in bar:
 
 
 
+model.embedding(torch.tensor(vocab_ids[]))
 
 
 
