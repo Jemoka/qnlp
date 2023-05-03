@@ -1,8 +1,10 @@
 import numpy as torch
 import torch
+import tqdm
 
 import torch.nn as nn
 import torch.nn.utils as utils
+from torch.optim import AdamW
 
 import torch.linalg as L
 import torch.functional as F
@@ -13,9 +15,12 @@ from nltk.collocations import *
 
 from nltk import sent_tokenize
 
+import nltk 
 from sklearn.feature_extraction.text import CountVectorizer
 
-class SemidefiniteMap(nn.Module):
+from collections import defaultdict
+
+class SemidefiniteDensityMap(nn.Module):
     """A positive semidefinite operator like Pl, Pr
 
     Parameters
@@ -31,10 +36,11 @@ class SemidefiniteMap(nn.Module):
         self.V = utils.parametrizations.orthogonal(nn.Linear(size, size))
         self.singular_values_unrelu = nn.Parameter(torch.rand(size))
         self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=0)
 
     def get(self):
         singular_values = self.relu(self.singular_values_unrelu)
-        return self.U.weight @ torch.diag(singular_values) @ self.V.weight.T
+        return self.U.weight @ torch.diag(self.softmax(singular_values)) @ self.V.weight.T
 
     def forward(self,x):
         singular_values = self.relu(self.singular_values_unrelu)
@@ -49,42 +55,22 @@ class QNLPModel(nn.Module):
     def __init__(self, vocab_size, hidden_dim):
         super().__init__()
 
+        self.hidden = hidden_dim
+
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
         self.D = nn.Linear(1, hidden_dim)
 
-        self.Pl = SemidefiniteMap(hidden_dim)
-        self.Pr = SemidefiniteMap(hidden_dim)
+        self.Pl = SemidefiniteDensityMap(hidden_dim)
+        self.Pr = SemidefiniteDensityMap(hidden_dim)
 
     def forward(self, x):
         embedded = self.D(self.embedding(x).unsqueeze(2))
-        M_dxd = torch.matmul(*embedded)
-        phi_M = phi(self.Pl.get(), M_dxd, self.Pr.get())
+        base_matrix = torch.eye(self.hidden)
+        for i in reversed(embedded):
+            base_matrix = i@base_matrix
+        phi_M = phi(self.Pl.get(), base_matrix, self.Pr.get())
 
         return phi_M
-        
-model = QNLPModel(8, 4)
-model(torch.tensor([2,3]))
-
-
-
-def densityp(Pl:torch.tensor, Pr:torch.tensor):
-    return torch.trace(Pl @ Pr) == 1
-
-def semidefinitify(m:torch.tensor):
-    """take m and appling to its conjugate transpose, hence returning a semidefinte tensor
-
-    Conditions for semidefinity: z* M z is real positive for any nonzero complex vector z
-
-    Small proof for why this works:
-    z* M M* z = (M* z)* (M* z); and so the inner product between them will cause negative
-      by negative, imag to imag, making it real and positive
-
-    Question for ted: wouldn't this make all M real? Isn't that a problem?
-    """
-    return m @ m.conj().transpose(1,0)
-
-
-
 
 # prepare n-gram frequency data
 vect = CountVectorizer(analyzer='word', ngram_range=(1,3))
@@ -93,16 +79,49 @@ results = analyzer(' '.join(brown.words()))
 results.reverse() # because we want the LEAST frequent first
 frequency_distribution = nltk.FreqDist(results)
 
-# and now
-frequency_distribution.freq("what is")
-relative_frequency
+# build vocab list
+vocab = set(brown.words())
+vocab_ids = defaultdict(lambda:len(vocab_ids))
+vocab_id_reverse = {vocab_ids[word]:word for word in vocab}
+vocab_ids = dict(vocab_ids)
 
-# get total ngrams
-total_ngrams = len(frequency_distribution)
-total_ngrams
-# create a random embedding space of it; embedding each in a 
-embedding = nn.Embedding(total_ngrams, 8)
-embedding(torch.tensor(4))
+# model 
+model = QNLPModel(len(vocab_ids), 256)
+optim = AdamW(model.parameters(), lr=3e-5)
+
+# for each group, train
+bar = tqdm.tqdm(frequency_distribution.elements())
+for group in bar:
+    freq = torch.tensor(frequency_distribution.freq(group))
+    words = group.split(" ")
+    try:
+        in_tensor = torch.tensor([vocab_ids[i] for i in words])
+    except KeyError:
+        # OOV
+        optim.zero_grad()
+        continue
+    out_tensor = model(in_tensor)
+    mse = (freq - out_tensor)**2
+    mse.backward()
+    optim.step()
+    optim.zero_grad()
+
+    bar.set_description(f"loss: {round(mse.item(), 3)}")
+
+
+
+
+
+
+# model
+# brown.words()
+
+# # get total ngrams
+# total_ngrams = len(frequency_distribution)
+# total_ngrams
+# # create a random embedding space of it; embedding each in a 
+# embedding = nn.Embedding(total_ngrams, 8)
+# embedding(torch.tensor(4))
 
 
 # questions
