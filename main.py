@@ -4,7 +4,7 @@ import tqdm
 
 import torch.nn as nn
 import torch.nn.utils as utils
-from torch.optim import AdamW
+from torch.optim import AdamW, SGD
 
 import torch.linalg as L
 import torch.functional as F
@@ -20,6 +20,9 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 from collections import defaultdict
 
+# TODO
+# - search DIRECTLY on these matricies for SemidefiniteDensityMap 
+# - missing: COMPLEX NUMBERS!!!! AAAAAAAAA; use polar form
 class SemidefiniteDensityMap(nn.Module):
     """A positive semidefinite operator like Pl, Pr
 
@@ -32,20 +35,21 @@ class SemidefiniteDensityMap(nn.Module):
     def __init__(self, size):
         super().__init__()
 
-        self.U = utils.parametrizations.orthogonal(nn.Linear(size, size))
-        self.V = utils.parametrizations.orthogonal(nn.Linear(size, size))
-        self.singular_values_unrelu = nn.Parameter(torch.rand(size))
+        self.U = utils.parametrizations.orthogonal(nn.Linear(size, size).to(torch.cfloat))
+        self.V = utils.parametrizations.orthogonal(nn.Linear(size, size).to(torch.cfloat))
+        self.singular_values = nn.Parameter(torch.rand(size))
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=0)
 
     def get(self):
-        singular_values = self.relu(self.singular_values_unrelu)
-        return self.U.weight @ torch.diag(self.softmax(singular_values)) @ self.V.weight.T
+        return self.U.weight @ torch.diag(self.relu(self.singular_values)).to(torch.cfloat) @ self.V.weight.T
 
     def forward(self,x):
-        singular_values = self.relu(self.singular_values_unrelu)
+        singular_values = self.relu(self.singular_values)
 
         return self.get() @ x
+
+m = SemidefiniteDensityMap(2)
 
 def phi(Pl:torch.tensor, M:torch.tensor, Pr:torch.tensor):
     return torch.trace(Pl@M@Pr@M.conj().transpose(1,0))
@@ -58,14 +62,14 @@ class QNLPModel(nn.Module):
         self.hidden = hidden_dim
 
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
-        self.D = nn.Linear(1, hidden_dim)
+        self.D = nn.Linear(1, hidden_dim).to(torch.cfloat)
 
         self.Pl = SemidefiniteDensityMap(hidden_dim)
         self.Pr = SemidefiniteDensityMap(hidden_dim)
 
     def forward(self, x):
-        embedded = self.D(self.embedding(x).unsqueeze(2))
-        base_matrix = torch.eye(self.hidden)
+        embedded = self.D(self.embedding(x).unsqueeze(2).to(torch.cfloat))
+        base_matrix = torch.eye(self.hidden).to(torch.cfloat)
         for i in reversed(embedded):
             base_matrix = i@base_matrix
         phi_M = phi(self.Pl.get(), base_matrix, self.Pr.get())
@@ -113,11 +117,13 @@ for group in bar:
     optim.step()
     optim.zero_grad()
 
-    bar.set_description(f"loss: {round(mse.item(), 3)}")
+    bar.set_description(f"loss: {round(torch.norm(mse).item(), 3)}")
 
 
 
-model.embedding(torch.tensor(vocab_ids[]))
+
+
+# model.embedding(torch.tensor(vocab_ids[]))
 
 
 
